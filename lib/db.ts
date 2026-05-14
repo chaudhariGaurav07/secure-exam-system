@@ -18,7 +18,7 @@ if (!chashed) {
     };
 }
 
-export async function connectDb() {
+export async function connectDB() {
     if(chashed.conn) return chashed.conn
     
     if(!chashed.promise){
