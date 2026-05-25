@@ -16,6 +16,7 @@
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.76.8",
     "cookie": "^1.1.1",
+    "crypto-js": "^4.2.0",
     "dotenv": "^17.4.2",
     "ioredis": "^5.10.1",
     "jose": "^6.2.3",
@@ -32,6 +33,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/crypto-js": "^4.2.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
