@@ -38,7 +38,7 @@ export async function POST(req: Request) {
       );
     }
     const token = await createToken({
-      id: user._id,
+      id: String(user._id),
       role: user.role,
       email: user.email,
     });
@@ -73,10 +73,12 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
+     console.error("LOGIN ERROR:", error);
     return Response.json(
       {
         success: false,
         message: "Login failed",
+        error: String(error),
       },
       { status: 500 },
     );
