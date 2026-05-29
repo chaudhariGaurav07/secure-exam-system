@@ -1,6 +1,7 @@
 import { connectDB } from "@/lib/db";
 import { headers } from "next/headers";
 import { Template } from "@/models/Template";
+import { Paper } from "@/models/Paper";
 import { generatePaperSets } from "@/services/paper.service";
 import { createAuditLog } from "@/services/audit.service";
 
@@ -26,15 +27,27 @@ export async function POST(req: Request) {
 
     const sets = await generatePaperSets(template);
 
+  
+    const savedPapers = await Promise.all(
+      sets.map(async (set) => {
+        return await Paper.create({
+          templateId: template._id,
+          setNumber: set.setNo,
+          questions: set.paperQuestions,
+          finalized: false,
+        });
+      })
+    );
+
     await createAuditLog({
       userId,
       action:  "PAPER_SETS_GENERATED",
       role:    userRole,
       ip:      req.headers.get("x-forwarded-for") ?? "unknown",
-      details: { templateId: body.templateId, setsCount: sets.length },
+      details: { templateId: body.templateId, setsCount: savedPapers.length },
     });
 
-    return Response.json({ success: true, sets });
+    return Response.json({ success: true, sets: savedPapers });
   } catch (error) {
     console.error("GENERATE ERROR:", error);
     return Response.json(
