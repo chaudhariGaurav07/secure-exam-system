@@ -9,11 +9,12 @@ const PUBLIC_API_ROUTES = [
 
 // Role requirements per API route prefix
 const ROLE_REQUIREMENTS: Record<string, string[]> = {
-  "/api/admin":          ["admin"],
-  "/api/papers/finalize": ["admin", "reviewer"],
-  "/api/papers/open":    ["admin", "reviewer", "exam_center"],
-  "/api/papers/generate": ["admin"],
-  "/api/templates":      ["admin"],
+  "/api/admin":            ["admin"],
+  "/api/papers/finalize":  ["admin", "reviewer"],
+  "/api/papers/release":   ["admin", "reviewer", "exam_center"],
+  "/api/papers/open":      ["admin", "reviewer", "exam_center"],
+  "/api/papers/generate":  ["admin"],
+  "/api/templates":        ["admin"],
   "/api/questions/review": ["reviewer", "admin"],
   "/api/questions/create": ["author", "admin"],
 };
@@ -22,7 +23,7 @@ export async function proxy(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
   const isApiRoute = pathname.startsWith("/api/");
 
-  // ── API routes ───────────────────────────────────────────────────────────
+  //  API routes 
   if (isApiRoute) {
     // Allow public endpoints through
     if (PUBLIC_API_ROUTES.some((r) => pathname.startsWith(r))) {
@@ -72,7 +73,7 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  // ── Page routes ──────────────────────────────────────────────────────────
+  //  Page routes 
   const isProtectedPage = pathname.startsWith("/dashboard");
   if (!isProtectedPage) {
     return NextResponse.next();

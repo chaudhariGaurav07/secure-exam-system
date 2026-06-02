@@ -1,20 +1,22 @@
 import { connectDB } from "@/lib/db";
 import { headers } from "next/headers";
 import { Paper } from "@/models/Paper";
-import { encrypt } from "@/lib/encryption";
+import { encrypt, createHash } from "@/lib/encryption";
+import { uploadToIPFS } from "@/lib/ipfs";
+import { addBlock } from "@/lib/blockchain";
 import { createAuditLog } from "@/services/audit.service";
 
 export async function POST(req: Request) {
   try {
     await connectDB();
 
-    // Identity injected by proxy.ts only admin/reviewer dekh sakta hai 
+    // Identity injected by proxy.ts only admin/reviewer dekh sakta hai
     const headerStore = await headers();
     const userId   = headerStore.get("x-user-id");
     const userRole = headerStore.get("x-user-role");
 
     const body = await req.json();
-    const { paperId } = body;
+    const { paperId, releaseAt } = body;
 
     if (!paperId) {
       return Response.json(
@@ -23,7 +25,13 @@ export async function POST(req: Request) {
       );
     }
 
-    // Fetch the paper and verify it hasn't already been finalized
+    if (!releaseAt) {
+      return Response.json(
+        { success: false, error: "releaseAt (ISO date string) is required" },
+        { status: 400 }
+      );
+    }
+
     const paper = await Paper.findById(paperId);
 
     if (!paper) {
@@ -40,33 +48,50 @@ export async function POST(req: Request) {
       );
     }
 
-    // Encrypt the full paper payload for secure at rest storage
-    const encryptedPaper = encrypt(JSON.stringify(paper.toObject()));
+    // 1. Encrypt the full question list for secure at rest storage
+    const paperString   = JSON.stringify(paper.questions);
+    const encryptedPaper = encrypt(paperString);
 
-    const finalizedPaper = await Paper.findByIdAndUpdate(
-      paperId,
-      {
-        finalized:      true,
-        reviewedBy:     userId,
-        encryptedPaper,
-      },
-      { new: true }
-    );
+    // 2. Hash the encrypted content for tamper detection
+    const hash = createHash(encryptedPaper);
+
+    // 3. Upload to IPFS (Pinata) — content-addressed, survives restarts
+    const cid = await uploadToIPFS(encryptedPaper);
+
+    // 4. Record this event permanently on the blockchain
+    const block = await addBlock({
+      cid,
+      hash,
+      paperId:   paper._id,
+      setNumber: paper.setNumber,
+      finalizedBy: userId,
+    });
+
+    // 5. Lock the paper in the database
+    paper.encryptedPaper = encryptedPaper;
+    paper.generatedHash  = hash;
+    paper.cid            = cid;
+    paper.releaseAt      = new Date(releaseAt);
+    paper.reviewedBy     = userId as any;
+    paper.finalized      = true;
+
+    await paper.save();
 
     await createAuditLog({
       userId,
       action:  "PAPER_FINALIZED",
       role:    userRole,
       ip:      req.headers.get("x-forwarded-for") ?? "unknown",
-      details: { paperId, setNumber: paper.setNumber },
+      details: { paperId, cid, hash, blockIndex: block.index },
     });
 
     return Response.json({
-      success: true,
-      message: "Paper finalized and encrypted",
-      paperId:   finalizedPaper?._id,
-      setNumber: finalizedPaper?.setNumber,
-      finalized: finalizedPaper?.finalized,
+      success:   true,
+      message:   "Paper finalized, encrypted, and pinned to IPFS",
+      cid,
+      hash,
+      blockIndex: block.index,
+      releaseAt,
     });
   } catch (error) {
     console.error("FINALIZE ERROR:", error);

@@ -11,7 +11,13 @@ const PaperSchema = new Schema(
 
     questions: Array,
 
-    generatedHash: String,
+    generatedHash: { type: String, immutable: true },
+
+    // IPFS content identifier — set at finalize, immutable after
+    cid: { type: String, immutable: true },
+
+    // Time-lock: paper cannot be released before this timestamp
+    releaseAt: { type: Date },
 
     finalized: {
       type: Boolean,
@@ -23,7 +29,7 @@ const PaperSchema = new Schema(
       ref: "User",
     },
 
-    encryptedPaper: String,
+    encryptedPaper: { type: String, immutable: true },
   },
   {
     timestamps: true,
