@@ -2,21 +2,21 @@ import { connectDB } from "@/lib/db";
 import { headers } from "next/headers";
 import { Template } from "@/models/Template";
 import { createAuditLog } from "@/services/audit.service";
+import { validateBody, CreateTemplateSchema } from "@/lib/schemas";
 
 export async function POST(req: Request) {
   try {
     await connectDB();
 
-    // Identity injected by proxy.ts after JWT + RBAC check (admin only)
     const headerStore = await headers();
-    const userId   = headerStore.get("x-user-id");
-    const userRole = headerStore.get("x-user-role");
+    const userId   = headerStore.get("x-user-id")!;
+    const userRole = headerStore.get("x-user-role")!;
 
-    const body = await req.json();
+    const body = await validateBody(req, CreateTemplateSchema);
 
     const template = await Template.create({
       ...body,
-      createdBy: userId, // from verified JWT — never from body
+      createdBy: userId,
     });
 
     await createAuditLog({
@@ -29,10 +29,8 @@ export async function POST(req: Request) {
 
     return Response.json({ success: true, template });
   } catch (error) {
+    if (error instanceof Response) return error;
     console.error("TEMPLATE CREATE ERROR:", error);
-    return Response.json(
-      { success: false, error: String(error) },
-      { status: 500 }
-    );
+    return Response.json({ success: false, error: String(error) }, { status: 500 });
   }
 }

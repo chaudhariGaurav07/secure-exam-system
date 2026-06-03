@@ -1,30 +1,73 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "./lib/auth";
+import { checkRateLimit, isSuspicious } from "./lib/rate-limiter";
 
 // Public API routes that do NOT need authentication
 const PUBLIC_API_ROUTES = [
   "/api/auth/login",
   "/api/auth/register",
+  "/api/papers/verify", // Signature verification is public
 ];
 
 // Role requirements per API route prefix
 const ROLE_REQUIREMENTS: Record<string, string[]> = {
-  "/api/admin":            ["admin"],
-  "/api/papers/finalize":  ["admin", "reviewer"],
-  "/api/papers/release":   ["admin", "reviewer", "exam_center"],
-  "/api/papers/open":      ["admin", "reviewer", "exam_center"],
-  "/api/papers/generate":  ["admin"],
-  "/api/templates":        ["admin"],
-  "/api/questions/review": ["reviewer", "admin"],
-  "/api/questions/create": ["author", "admin"],
+  // Admin-only
+  "/api/admin":              ["admin"],
+  "/api/papers/generate":    ["admin"],
+
+  // Paper lifecycle
+  "/api/papers/finalize":    ["admin", "reviewer"],
+  "/api/papers/approve":     ["reviewer", "admin"],
+  "/api/papers/release":     ["admin", "reviewer", "exam_center"],
+  "/api/papers/open":        ["admin", "reviewer", "exam_center"],
+
+  // List routes
+  "/api/papers":             ["admin", "reviewer", "exam_center"],
+  "/api/templates":          ["admin", "reviewer", "author", "exam_center"],
+  "/api/questions/review":   ["reviewer", "admin"],
+  "/api/questions/create":   ["author", "admin"],
+  "/api/questions":          ["admin", "reviewer", "author", "exam_center"],
 };
+
 
 export async function proxy(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
   const isApiRoute = pathname.startsWith("/api/");
 
-  //  API routes 
+  //  API routes
   if (isApiRoute) {
+    // Intrusion Detection + Rate Limiting
+    const ip = req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "unknown";
+    // Skip rate limiting for localhost (dev/test environment)
+    const isLocalhost = ip === "unknown" || ip === "127.0.0.1" || ip === "::1";
+    const rateLimit   = isLocalhost ? 5000 : 30; // 5000/min locally, 30/min in prod
+    const rateResult  = checkRateLimit(ip, rateLimit, 60_000);
+
+    if (!rateResult.allowed) {
+      // Log intrusion asynchronously — fire and forget
+      console.warn(`[INTRUSION] Rate limit exceeded — IP: ${ip}, count: ${rateResult.count}`);
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Too many requests — rate limit exceeded",
+          resetAt: new Date(rateResult.resetAt).toISOString(),
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(Math.ceil((rateResult.resetAt - Date.now()) / 1000)),
+            "X-RateLimit-Remaining": "0",
+          },
+        }
+      );
+    }
+
+    // Flag suspicious activity (high volume, likely brute force)
+    if (isSuspicious(ip, 20)) {
+      console.warn(`[INTRUSION] Suspicious activity detected — IP: ${ip}`);
+      // Still allow through (not blocked yet) but logged for audit
+    }
+
     // Allow public endpoints through
     if (PUBLIC_API_ROUTES.some((r) => pathname.startsWith(r))) {
       return NextResponse.next();
