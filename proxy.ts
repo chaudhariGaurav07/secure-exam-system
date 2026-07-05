@@ -6,6 +6,7 @@ import { checkRateLimit, isSuspicious } from "./lib/rate-limiter";
 const PUBLIC_API_ROUTES = [
   "/api/auth/login",
   "/api/auth/register",
+  "/api/auth/me",       // Token verified inside the route handler
   "/api/papers/verify", // Signature verification is public
 ];
 
@@ -13,16 +14,16 @@ const PUBLIC_API_ROUTES = [
 const ROLE_REQUIREMENTS: Record<string, string[]> = {
   // Admin-only
   "/api/admin":              ["admin"],
-  "/api/papers/generate":    ["admin"],
 
   // Paper lifecycle
+  "/api/papers/generate":    ["admin", "author"],
   "/api/papers/finalize":    ["admin", "reviewer"],
   "/api/papers/approve":     ["reviewer", "admin"],
   "/api/papers/release":     ["admin", "reviewer", "exam_center"],
   "/api/papers/open":        ["admin", "reviewer", "exam_center"],
 
-  // List routes
-  "/api/papers":             ["admin", "reviewer", "exam_center"],
+  // List routes (all roles)
+  "/api/papers":             ["admin", "reviewer", "author", "exam_center"],
   "/api/templates":          ["admin", "reviewer", "author", "exam_center"],
   "/api/questions/review":   ["reviewer", "admin"],
   "/api/questions/create":   ["author", "admin"],

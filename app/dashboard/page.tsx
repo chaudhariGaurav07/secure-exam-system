@@ -11,14 +11,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
-interface AuditDoc {
-  _id: string;
-  action: string;
-  role: string;
-  createdAt: Date;
-  userId?: { name: string; email: string };
-}
-
 export default async function DashboardPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("token")?.value!;
@@ -26,10 +18,13 @@ export default async function DashboardPage() {
 
   await connectDB();
 
+  const isAdmin = payload?.role === "admin";
+
   const [
     totalQuestions,
     pendingQuestions,
     approvedQuestions,
+    rejectedQuestions,
     totalPapers,
     finalizedPapers,
     totalUsers,
@@ -38,14 +33,15 @@ export default async function DashboardPage() {
     Question.countDocuments({}),
     Question.countDocuments({ status: "pending" }),
     Question.countDocuments({ status: "approved" }),
+    Question.countDocuments({ status: "rejected" }),
     Paper.countDocuments({}),
     Paper.countDocuments({ finalized: true }),
-    payload?.role === "admin" ? User.countDocuments({}) : Promise.resolve(null),
+    isAdmin ? User.countDocuments({}) : Promise.resolve(0),
     Audit.find({})
       .sort({ createdAt: -1 })
       .limit(8)
       .populate("userId", "name email")
-      .lean() as Promise<AuditDoc[]>,
+      .lean(),
   ]);
 
   const roleLabel: Record<string, string> = {
@@ -63,14 +59,15 @@ export default async function DashboardPage() {
   }
 
   const actionColor: Record<string, string> = {
-    LOGIN: "var(--clr-info)",
-    LOGOUT: "var(--clr-grey-02)",
-    CREATE_QUESTION: "var(--clr-success)",
-    REVIEW_QUESTION: "var(--clr-warning)",
-    GENERATE_PAPER: "var(--clr-primary)",
-    FINALIZE_PAPER: "var(--clr-primary-dark)",
-    APPROVE_PAPER: "var(--clr-success)",
-    RELEASE_PAPER: "var(--clr-danger)",
+    LOGIN:                "var(--clr-info)",
+    LOGOUT:               "var(--clr-grey-02)",
+    QUESTION_CREATED:     "var(--clr-success)",
+    CREATE_QUESTION:      "var(--clr-success)",
+    REVIEW_QUESTION:      "#856404",
+    PAPER_SETS_GENERATED: "var(--clr-primary)",
+    PAPER_APPROVED:       "var(--clr-success)",
+    PAPER_FINALIZED:      "var(--clr-primary-dark)",
+    PAPER_RELEASED:       "var(--clr-danger)",
   };
 
   return (
@@ -87,7 +84,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Stats row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
         <div className="gov-stat-card">
           <div className="gov-stat-icon blue"><HelpCircle size={22} /></div>
           <div>
@@ -123,7 +120,7 @@ export default async function DashboardPage() {
             <div className="gov-stat-label">Finalized Papers</div>
           </div>
         </div>
-        {payload?.role === "admin" && totalUsers !== null && (
+        {isAdmin && (
           <div className="gov-stat-card">
             <div className="gov-stat-icon blue"><Users size={22} /></div>
             <div>
@@ -134,7 +131,7 @@ export default async function DashboardPage() {
         )}
       </div>
 
-      {/* Quick actions */}
+      {/* Quick actions + Question status */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1.25rem", marginBottom: "2rem" }}>
         <div className="gov-card">
           <div className="section-title">Quick Actions</div>
@@ -142,6 +139,11 @@ export default async function DashboardPage() {
             {(payload?.role === "author" || payload?.role === "admin") && (
               <Link href="/dashboard/questions" id="qs-action-questions" className="btn btn-outline" style={{ justifyContent: "flex-start" }}>
                 <HelpCircle size={16} /> Manage Questions
+              </Link>
+            )}
+            {payload?.role === "reviewer" && (
+              <Link href="/dashboard/questions" id="qs-action-review" className="btn btn-outline" style={{ justifyContent: "flex-start" }}>
+                <HelpCircle size={16} /> Review Questions ({pendingQuestions} pending)
               </Link>
             )}
             {(payload?.role === "author" || payload?.role === "admin") && (
@@ -152,7 +154,7 @@ export default async function DashboardPage() {
             <Link href="/dashboard/papers" id="qs-action-papers" className="btn btn-outline" style={{ justifyContent: "flex-start" }}>
               <FileText size={16} /> View Exam Papers
             </Link>
-            {payload?.role === "admin" && (
+            {isAdmin && (
               <Link href="/dashboard/audit" id="qs-action-audit" className="btn btn-primary" style={{ justifyContent: "flex-start" }}>
                 <AlertCircle size={16} /> Audit Log
               </Link>
@@ -162,37 +164,43 @@ export default async function DashboardPage() {
 
         {/* Question status breakdown */}
         <div className="gov-card">
-          <div className="section-title">Question Status</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-            {[
-              { label: "Pending", count: pendingQuestions, total: totalQuestions, color: "var(--clr-warning)" },
-              { label: "Approved", count: approvedQuestions, total: totalQuestions, color: "var(--clr-success)" },
-              { label: "Rejected", count: totalQuestions - pendingQuestions - approvedQuestions, total: totalQuestions, color: "var(--clr-danger)" },
-            ].map((s) => (
-              <div key={s.label}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", marginBottom: 4 }}>
-                  <span style={{ fontWeight: 600, color: "var(--clr-text-dark)" }}>{s.label}</span>
-                  <span style={{ color: "var(--clr-text-muted)" }}>{s.count} / {s.total}</span>
+          <div className="section-title">Question Status Breakdown</div>
+          {totalQuestions === 0 ? (
+            <div className="empty-state" style={{ padding: "1.5rem 0" }}>
+              <div className="empty-state-icon" style={{ fontSize: "2rem" }}>📭</div>
+              <div className="empty-state-text">No questions yet.</div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.875rem" }}>
+              {[
+                { label: "Approved", count: approvedQuestions, color: "var(--clr-success)" },
+                { label: "Pending", count: pendingQuestions, color: "var(--clr-warning)" },
+                { label: "Rejected", count: rejectedQuestions, color: "var(--clr-danger)" },
+              ].map((s) => (
+                <div key={s.label}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", marginBottom: 4 }}>
+                    <span style={{ fontWeight: 600 }}>{s.label}</span>
+                    <span style={{ color: "var(--clr-text-muted)" }}>{s.count} / {totalQuestions}</span>
+                  </div>
+                  <div style={{ height: 8, background: "var(--clr-linen)", borderRadius: 100, overflow: "hidden" }}>
+                    <div style={{
+                      height: "100%", borderRadius: 100, background: s.color,
+                      width: totalQuestions ? `${Math.round((s.count / totalQuestions) * 100)}%` : "0%",
+                      transition: "width 0.5s ease",
+                    }} />
+                  </div>
                 </div>
-                <div style={{ height: 8, background: "var(--clr-linen)", borderRadius: 100, overflow: "hidden" }}>
-                  <div style={{
-                    height: "100%", borderRadius: 100,
-                    background: s.color,
-                    width: s.total ? `${Math.round((s.count / s.total) * 100)}%` : "0%",
-                    transition: "width 0.5s ease",
-                  }} />
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Recent Audit Activity */}
       <div className="gov-card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-          <div className="section-title" style={{ marginBottom: 0 }}>Recent Activity</div>
-          {payload?.role === "admin" && (
+          <div className="section-title" style={{ marginBottom: 0 }}>Recent System Activity</div>
+          {isAdmin && (
             <Link href="/dashboard/audit" id="dashboard-view-full-audit" className="btn btn-ghost btn-sm">
               View Full Log →
             </Link>
@@ -202,7 +210,7 @@ export default async function DashboardPage() {
         {recentAudit.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">📋</div>
-            <div className="empty-state-text">No activity recorded yet.</div>
+            <div className="empty-state-text">No activity recorded yet. Events appear here as users interact with the system.</div>
           </div>
         ) : (
           <div className="gov-table-wrap">
@@ -216,33 +224,45 @@ export default async function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {recentAudit.map((log) => (
-                  <tr key={String(log._id)}>
-                    <td>
-                      <span style={{
-                        fontWeight: 700, fontSize: "0.78rem",
-                        color: actionColor[log.action] || "var(--clr-primary)",
-                        fontFamily: "monospace",
-                      }}>
-                        {log.action}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: "0.85rem" }}>
-                      {log.userId?.name ?? "—"}
-                      {log.userId?.email && (
-                        <div style={{ fontSize: "0.72rem", color: "var(--clr-text-muted)" }}>{log.userId.email}</div>
-                      )}
-                    </td>
-                    <td>
-                      <span className="badge badge-approved" style={{ textTransform: "capitalize" }}>
-                        {log.role}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: "0.8rem", color: "var(--clr-text-muted)", whiteSpace: "nowrap" }}>
-                      {formatTime(log.createdAt)}
-                    </td>
-                  </tr>
-                ))}
+                {recentAudit.map((log) => {
+                  const logDoc = log as {
+                    _id: unknown;
+                    action: string;
+                    role: string;
+                    createdAt: Date;
+                    userId?: { name: string; email: string };
+                  };
+                  return (
+                    <tr key={String(logDoc._id)}>
+                      <td>
+                        <span style={{
+                          fontWeight: 700, fontSize: "0.78rem",
+                          color: actionColor[logDoc.action] || "var(--clr-primary)",
+                          fontFamily: "monospace",
+                          background: "var(--clr-surface)",
+                          padding: "2px 8px", borderRadius: 4,
+                          display: "inline-block",
+                        }}>
+                          {logDoc.action}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: "0.85rem" }}>
+                        {logDoc.userId?.name ?? "System"}
+                        {logDoc.userId?.email && (
+                          <div style={{ fontSize: "0.72rem", color: "var(--clr-text-muted)" }}>{logDoc.userId.email}</div>
+                        )}
+                      </td>
+                      <td>
+                        <span className="badge badge-approved" style={{ textTransform: "capitalize" }}>
+                          {logDoc.role}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: "0.8rem", color: "var(--clr-text-muted)", whiteSpace: "nowrap" }}>
+                        {formatTime(logDoc.createdAt)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
